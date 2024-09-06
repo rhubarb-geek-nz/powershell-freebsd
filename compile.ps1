@@ -56,7 +56,7 @@ try
 		(
 			set -e
 			cd src/powershell-unix/bin/Release/net*/$RID/publish
-			find . -type l | xargs rm
+			find . -type l | xargs --no-run-if-empty rm
 			tar cfz - *
 		) > ../powershell-$ReleaseTag-$RID.tar.gz
 "@ | sh -e
