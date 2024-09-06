@@ -14,7 +14,7 @@ Multiple environments are required to build the final packages.
 
 ### 1.1. Bootstrap the Linux build environment. 
     
-Setup the build environment to target FreeBSD on Linux. This is not as hard as it sounds, [bootstrap.ps1](bootstrap.ps1) should perform all the steps. Run this is as minimal environment as you can without an installed .NET SDK (eg in a `docker`) but with PowerShell.
+Setup the build environment to target FreeBSD on Linux. This is not as hard as it sounds, [bootstrap.ps1](bootstrap.ps1) should perform all the steps. Run this in as minimal environment as you can without an installed .NET SDK (eg in a `docker`) but with PowerShell.
 
 1. The [PowerShell](https://github.com/PowerShell/PowerShell) project is cloned from git.
 
