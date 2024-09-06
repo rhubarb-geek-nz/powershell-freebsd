@@ -1,0 +1,199 @@
+diff --git a/build.psm1 b/build.psm1
+index 5316bf19f..d00f2c7a0 100644
+--- a/build.psm1
++++ b/build.psm1
+@@ -319,6 +319,8 @@ function Start-PSBuild {
+                      "linux-arm",
+                      "linux-arm64",
+                      "linux-x64",
++                     "freebsd-arm64",
++                     "freebsd-x64",
+                      "osx-arm64",
+                      "osx-x64",
+                      "win-arm",
+@@ -910,6 +912,8 @@ function New-PSOptions {
+                      "linux-arm",
+                      "linux-arm64",
+                      "linux-x64",
++                     "freebsd-arm64",
++                     "freebsd-x64",
+                      "osx-arm64",
+                      "osx-x64",
+                      "win-arm",
+diff --git a/src/powershell-unix/powershell-unix.csproj b/src/powershell-unix/powershell-unix.csproj
+index 802acf05e..a48eb75c9 100644
+--- a/src/powershell-unix/powershell-unix.csproj
++++ b/src/powershell-unix/powershell-unix.csproj
+@@ -1,4 +1,4 @@
+-<Project Sdk="Microsoft.NET.Sdk">
++<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="SelfContained">
+ 
+   <Import Project="..\..\PowerShell.Common.props"/>
+ 
+@@ -10,6 +10,7 @@
+     <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
+     <TieredCompilationQuickJitForLoops>true</TieredCompilationQuickJitForLoops>
+     <RuntimeIdentifiers>linux-x64;osx-x64;</RuntimeIdentifiers>
++    <SelfContained>False</SelfContained>
+   </PropertyGroup>
+ 
+   <ItemGroup>
+diff --git a/src/powershell/Program.cs b/src/powershell/Program.cs
+index 70346a1d1..636936450 100644
+--- a/src/powershell/Program.cs
++++ b/src/powershell/Program.cs
+@@ -48,14 +48,12 @@ namespace Microsoft.PowerShell
+         private const string LOGIN_ENV_VAR_NAME = "__PWSH_LOGIN_CHECKED";
+         private const string LOGIN_ENV_VAR_VALUE = "1";
+ 
+-        // Linux p/Invoke constants
+-        private const int LINUX_PATH_MAX = 4096;
+-
+         // MacOS p/Invoke constants
+-        private const int MACOS_CTL_KERN = 1;
+-        private const int MACOS_KERN_ARGMAX = 8;
+-        private const int MACOS_KERN_PROCARGS2 = 49;
+-        private const int MACOS_PROC_PIDPATHINFO_MAXSIZE = 4096;
++        private const int FREEBSD_CTL_KERN = 1;
++        private const int FREEBSD_KERN_ARGMAX = 8;
++        private const int FREEBSD_KERN_PROC = 14;
++        private const int FREEBSD_KERN_PROC_ARGS = 7;
++        private const int FREEBSD_KERN_PROC_PATHNAME = 12;
+ #endif
+ 
+         /// <summary>
+@@ -90,49 +88,14 @@ namespace Microsoft.PowerShell
+                 return;
+             }
+ 
+-            bool isLinux = Platform.IsLinux;
+-
+             // The first byte (ASCII char) of the name of this process, used to detect '-' for login
+             byte procNameFirstByte;
+ 
+-            // The path to the executable this process was started from
+-            string? pwshPath;
+-
+-            // On Linux, we can simply use the /proc filesystem
+-            if (isLinux)
+-            {
+-                // Read the process name byte
+-                using (FileStream fs = File.OpenRead("/proc/self/cmdline"))
+-                {
+-                    procNameFirstByte = (byte)fs.ReadByte();
+-                }
+-
+-                // Run login detection logic
+-                if (!IsLogin(procNameFirstByte, args))
+-                {
+-                    return;
+-                }
+-
+-                // Read the symlink to the startup executable
+-                IntPtr linkPathPtr = Marshal.AllocHGlobal(LINUX_PATH_MAX);
+-                IntPtr bufSize = ReadLink("/proc/self/exe", linkPathPtr, (UIntPtr)LINUX_PATH_MAX);
+-                pwshPath = Marshal.PtrToStringAnsi(linkPathPtr, (int)bufSize);
+-                Marshal.FreeHGlobal(linkPathPtr);
+-
+-                ArgumentNullException.ThrowIfNull(pwshPath);
+-
+-                // exec pwsh
+-                ThrowOnFailure("exec", ExecPwshLogin(args, pwshPath, isMacOS: false));
+-                return;
+-            }
+-
+-            // At this point, we are on macOS
+-
+             // Set up the mib array and the query for process maximum args size
+-            Span<int> mib = stackalloc int[3];
++            Span<int> mib = stackalloc int[4];
+             int mibLength = 2;
+-            mib[0] = MACOS_CTL_KERN;
+-            mib[1] = MACOS_KERN_ARGMAX;
++            mib[0] = FREEBSD_CTL_KERN;
++            mib[1] = FREEBSD_KERN_ARGMAX;
+             int size = IntPtr.Size / 2;
+             int argmax = 0;
+ 
+@@ -148,51 +111,26 @@ namespace Microsoft.PowerShell
+             // Get the PID so we can query this process' args
+             int pid = GetPid();
+ 
+-            // The following logic is based on https://gist.github.com/nonowarn/770696
+-
+             // Now read the process args into the allocated space
+             IntPtr procargs = Marshal.AllocHGlobal(argmax);
+-            IntPtr executablePathPtr = IntPtr.Zero;
++
+             try
+             {
+-                mib[0] = MACOS_CTL_KERN;
+-                mib[1] = MACOS_KERN_PROCARGS2;
+-                mib[2] = pid;
+-                mibLength = 3;
++                mib[0] = FREEBSD_CTL_KERN;
++                mib[1] = FREEBSD_KERN_PROC;
++                mib[2] = FREEBSD_KERN_PROC_ARGS;
++                mib[3] = pid;
++                mibLength = 4;
++                int arglen = argmax;
+ 
+                 unsafe
+                 {
+                     fixed (int *mibptr = mib)
+                     {
+-                        ThrowOnFailure(nameof(procargs), SysCtl(mibptr, mibLength, procargs.ToPointer(), &argmax, IntPtr.Zero, 0));
++                        ThrowOnFailure(nameof(procargs), SysCtl(mibptr, mibLength, procargs.ToPointer(), &arglen, IntPtr.Zero, 0));
+                     }
+ 
+-                    // The memory block we're reading is a series of null-terminated strings
+-                    // that looks something like this:
+-                    //
+-                    // | argc      | <int>
+-                    // | exec_path | ... \0
+-                    // | argv[0]   | ... \0
+-                    // | argv[1]   | ... \0
+-                    //   ...
+-                    //
+-                    // We care about argv[0], since that's the name the process was started with.
+-                    // If argv[0][0] == '-', we have been invoked as login.
+-                    // Doing this, the buffer we populated also recorded `exec_path`,
+-                    // which is the path to our executable `pwsh`.
+-                    // We can reuse this value later to prevent needing to call a .NET API
+-                    // to generate our exec invocation.
+-
+-                    // We don't care about argc's value, since argv[0] must always exist.
+-                    // Skip over argc, but remember where exec_path is for later
+-                    executablePathPtr = IntPtr.Add(procargs, sizeof(int));
+-
+-                    // Skip over exec_path
+-                    byte *argvPtr = (byte *)executablePathPtr;
+-                    while (*argvPtr != 0) { argvPtr++; }
+-                    while (*argvPtr == 0) { argvPtr++; }
+-
+-                    // First char in argv[0]
++                    byte *argvPtr = (byte *)procargs;
+                     procNameFirstByte = *argvPtr;
+                 }
+ 
+@@ -201,8 +139,19 @@ namespace Microsoft.PowerShell
+                     return;
+                 }
+ 
++                mib[2] = FREEBSD_KERN_PROC_PATHNAME;
++                arglen = argmax;
++
++                unsafe
++                {
++                    fixed (int *mibptr = mib)
++                    {
++                        ThrowOnFailure(nameof(procargs), SysCtl(mibptr, mibLength, procargs.ToPointer(), &arglen, IntPtr.Zero, 0));
++                    }
++                }
++
+                 // Get the pwshPath from exec_path
+-                pwshPath = Marshal.PtrToStringAnsi(executablePathPtr);
++                string? pwshPath = Marshal.PtrToStringAnsi(procargs);
+ 
+                 ArgumentNullException.ThrowIfNull(pwshPath);
+ 
