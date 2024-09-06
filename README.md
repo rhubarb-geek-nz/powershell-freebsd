@@ -4,7 +4,7 @@ Packages [PowerShell](https://github.com/PowerShell/PowerShell) for FreeBSD.
 
 ## Overview
 
-In this project, PowerShell is built in a Linux environment which has the `freebsd-arm64` and `freebsd-x64` added to the .NET SDK.
+In this project, PowerShell is built in a Linux environment which has `freebsd-arm64` and `freebsd-x64` packs added to the .NET SDK.
 
 ## Build process
 
@@ -38,7 +38,7 @@ Compile the application with [compile.ps1](compile.ps1) which uses `freebsd-arm6
 
 2. Build the `libpsl-native.so` on the native host using [compile.sh](compile.sh).
 
-3. Package the `FreeBSD` package file, this combines the result of the cross-compilation and the local `libpsl-native.so`.
+3. [Package](package.sh) the `FreeBSD` package file, this combines the result of the cross-compilation and the local `libpsl-native.so`.
 
 The resulting package depends on the `dotnet-runtime-8.0` package from [rhubarb-geek-nz/dotnet-freebsd](https://github.com/rhubarb-geek-nz/dotnet-freebsd)
 
